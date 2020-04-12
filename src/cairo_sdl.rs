@@ -1,10 +1,8 @@
 extern crate cairo;
-extern crate sdl2;
+extern crate chrono;
 
+extern crate sdl2;
 use cairo::Context;
-use cairo::FontFace;
-use cairo::FontSlant;
-use cairo::FontWeight;
 use cairo::Format;
 use cairo::ImageSurface;
 
@@ -12,15 +10,100 @@ use sdl2::pixels::PixelFormatEnum;
 
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
-use sdl2::pixels::Color;
-use sdl2::rect::Point;
+use std::ops::Deref;
+
 use sdl2::surface::Surface;
 
+use cairo::{FontFace, FontSlant, FontWeight};
+use chrono::prelude::*;
+use chrono::{DateTime, Local};
+use std::f64::consts::PI;
 use std::thread::sleep;
 use std::time;
 
 static SCREEN_WIDTH: i32 = 400;
 static SCREEN_HEIGHT: i32 = 300;
+static RADIUS: f64 = 100.0;
+
+fn draw_cairo(surface: &ImageSurface, scale: f64) {
+    let cr = Context::new(surface);
+    cr.scale(scale, scale);
+    cr.set_source_rgba(0.77, 0.4, 0.2, 1.0);
+    cr.rectangle(0., 0., SCREEN_WIDTH as f64, SCREEN_HEIGHT as f64);
+    cr.fill();
+
+    // Clock Face
+    cr.set_line_width(2.0);
+
+    let center_x = SCREEN_WIDTH as f64 / 2.0;
+    let center_y = SCREEN_HEIGHT as f64 / 2.0 - 40.0;
+
+    cr.set_source_rgb(1.0, 1.0, 1.0);
+    cr.arc(center_x, center_y, RADIUS, 0.0, 2.0 * PI);
+    cr.stroke();
+
+    for i in (0..12).rev() {
+        let mut inset = 0.1 * RADIUS;
+        if i % 3 == 0 {
+            inset = 0.2 * RADIUS;
+        }
+        let new_x = center_x + (RADIUS - inset) * (i as f64 * PI / 6.0).cos();
+        let new_y = center_y + (RADIUS - inset) * (i as f64 * PI / 6.0).sin();
+        cr.move_to(new_x, new_y);
+
+        let new_x = center_x + RADIUS * (i as f64 * PI / 6.0).cos();
+        let new_y = center_y + RADIUS * (i as f64 * PI / 6.0).sin();
+
+        cr.line_to(new_x, new_y);
+        cr.stroke();
+    }
+    // Hour
+
+    cr.set_source_rgb(2.0, 0.0, 0.0);
+    let local: DateTime<Local> = Local::now();
+    let hours = local.hour();
+    let minutes = local.minute();
+    let seconds = local.second();
+
+    cr.set_line_width(5.0);
+    cr.move_to(center_x, center_y);
+    let mut new_x =
+        center_x + RADIUS / 2.0 * (PI / 6.0 * hours as f64 + PI / 360.0 * minutes as f64).sin();
+    let mut new_y =
+        center_y + RADIUS / 2.0 * -(PI / 6.0 * hours as f64 + PI / 360.0 * minutes as f64).cos();
+    cr.line_to(new_x, new_y);
+    cr.stroke();
+
+    // Minutes
+    cr.set_source_rgb(0.0, 3.0, 0.0);
+    cr.set_line_width(4.0);
+    cr.move_to(center_x, center_y);
+    new_x = center_x + RADIUS * 0.7 * (PI / 30.0 * minutes as f64).sin();
+    new_y = center_y + RADIUS * 0.7 * -(PI / 30.0 * minutes as f64).cos();
+    cr.line_to(new_x, new_y);
+    cr.stroke();
+
+    // Seconds
+    cr.set_source_rgb(0.0, 0.0, 4.0);
+    cr.set_line_width(3.0);
+    cr.move_to(center_x, center_y);
+    new_x = center_x + RADIUS * 0.75 * (PI / 30.0 * seconds as f64).sin();
+    new_y = center_y + RADIUS * 0.75 * -(PI / 30.0 * seconds as f64).cos();
+    cr.line_to(new_x, new_y);
+    cr.stroke();
+
+    let font = FontFace::toy_create("Sans", FontSlant::Normal, FontWeight::Bold);
+    cr.set_font_face(&font);
+    // show text
+    cr.set_source_rgb(1.0, 1.0, 1.0);
+
+    let text = local.format("%H:%M:%S").to_string();
+    cr.set_font_size(24.0);
+
+    let text_ext = cr.text_extents(&text);
+    cr.move_to(center_x - text_ext.width as f64 / 2.0, 260.0);
+    cr.show_text(&text);
+}
 
 pub fn run_sdl2() -> Result<(), String> {
     let sdl_context = sdl2::init()?;
@@ -42,65 +125,19 @@ pub fn run_sdl2() -> Result<(), String> {
     let vrect = win_canvas.viewport();
     let scale = vrect.w as f64 / SCREEN_WIDTH as f64;
 
-    win_canvas.set_draw_color(Color::RGBA(195, 217, 255, 255));
     win_canvas.clear();
 
-    let sdl_surface =
-        Surface::new(vrect.w as u32, vrect.h as u32, PixelFormatEnum::RGBA32).unwrap();
+    let sdl_surface = Surface::new(vrect.w as u32, vrect.h as u32, PixelFormatEnum::RGBA32)
+        .map_err(|e| e.to_string())?;
 
     let stride: i32 = sdl_surface.pitch() as i32;
-
-    let data = unsafe {
-        let pixels = (*sdl_surface.raw()).pixels;
-        let size: usize = sdl_surface.height() as usize * sdl_surface.pitch() as usize;
-        println!("size: {}", size);
-        std::slice::from_raw_parts_mut(pixels as *mut u8, size)
-    };
-
-    let cairo_surface =
-        ImageSurface::create_for_data(data, Format::ARgb32, vrect.w as i32, vrect.h as i32, stride)
-            .unwrap();
-
-    let cr = Context::new(&cairo_surface);
-    cr.scale(scale, scale);
-    cr.set_line_width(25.0);
-
-    cr.set_source_rgb(1.0, 0.0, 0.0);
-    cr.line_to(0., 0.);
-    cr.line_to(100., 100.);
-    cr.stroke();
-
-    cr.set_source_rgb(0.0, 0.0, 1.0);
-    cr.line_to(0., 100.);
-    cr.line_to(100., 0.);
-    cr.stroke();
-    cr.move_to(20.0, 220.0);
-    cr.set_font_size(14.0);
-
-    cr.set_source_rgb(0.0, 0.0, 0.0);
-
-    let font = FontFace::toy_create("Helvetica", FontSlant::Normal, FontWeight::Bold);
-    cr.set_font_face(&font);
-    cr.show_text("…or create a new repository on the command line");
-    let angle = 0.0;
-    let dst = Some(vrect);
+    let mut cairo_surface = ImageSurface::create(Format::ARgb32, vrect.w as i32, vrect.h as i32)
+        .map_err(|e| e.to_string())?;
 
     let texture_creator = win_canvas.texture_creator();
-    let texture = texture_creator
-        .create_texture_from_surface(&sdl_surface)
-        .unwrap();
-
-    win_canvas.copy_ex(
-        &texture,
-        None,
-        dst,
-        angle,
-        Some(Point::new(vrect.w, vrect.h)),
-        false,
-        false,
-    )?;
-
-    win_canvas.present();
+    let mut texture = texture_creator
+        .create_texture_target(PixelFormatEnum::RGBA32, vrect.w as u32, vrect.h as u32)
+        .map_err(|e| e.to_string())?;
 
     'mainloop: loop {
         for event in sdl_context.event_pump()?.poll_iter() {
@@ -113,8 +150,14 @@ pub fn run_sdl2() -> Result<(), String> {
                 _ => {}
             }
         }
-
-        sleep(time::Duration::from_millis(100));
+        draw_cairo(&cairo_surface, scale);
+        let data = cairo_surface.get_data().map_err(|e| e.to_string())?;
+        texture
+            .update(vrect, data.deref(), stride as usize)
+            .map_err(|e| e.to_string())?;
+        win_canvas.copy(&texture, vrect, vrect)?;
+        win_canvas.present();
+        sleep(time::Duration::from_millis(200));
     }
 
     Ok(())
